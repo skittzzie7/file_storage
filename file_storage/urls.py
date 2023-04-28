@@ -9,4 +9,6 @@ urlpatterns = [
     path('', views.home, name='home'),
     path('upload/', views.upload_file, name='upload'),
     path('accounts/profile/', views.home, name='home'),
+   
+
 ]

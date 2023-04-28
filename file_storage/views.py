@@ -2,17 +2,9 @@ from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.contrib import messages
-
-from file_storage_project import settings
 from .models import UserProfile, File
 import os
 import hashlib
-
-from django.shortcuts import render, redirect
-from django.contrib import messages
-from .forms import UploadFileForm
-from .models import UserFile
-
 
 def home(request):
     if request.user.is_authenticated:
@@ -66,25 +58,33 @@ def logout_user(request):
 
 def upload_file(request):
     if request.method == 'POST':
-        form = UploadFileForm(request.POST, request.FILES)
-        if form.is_valid():
-            user_file = form.cleaned_data['user_file']
-            md5sum = user_file.read()
-            user_file.seek(0)
-            md5sum = hashlib.md5(md5sum).hexdigest()
-            user = request.user
-            path = os.path.join(settings.MEDIA_ROOT, str(user.id))
-            if not os.path.exists(path):
-                os.mkdir(path)
-            path = os.path.join(path, md5sum + '_' + user_file.name)
-            if not os.path.exists(path):
-                with open(path, 'wb+') as destination:
-                    for chunk in user_file.chunks():
-                        destination.write(chunk)
-                messages.success(request, 'Your file was successfully uploaded.')
-                UserFile.objects.create(user=user, file=path)
-            else:
-                messages.error(request, 'A file with the same name already exists.')
+        user_profile = UserProfile.objects.get(user=request.user)
+        uploaded_file = request.FILES['file']
+        file_path = os.path.join(user_profile.folder, uploaded_file.name)
+        if os.path.exists(file_path):
+            # If file already exists, delete it
+            os.remove(file_path)
+        with open(file_path, 'wb') as f:
+            # Write the uploaded file to disk
+            f.write(uploaded_file.read())
+        with open(file_path, 'rb') as f:
+            # Calculate the MD5 hash of the file
+            md5_hash = hashlib.md5(f.read()).hexdigest()
+            # Check if any other file in the user's folder has the same MD5 hash
+            duplicate_files = File.objects.filter(user_profile=user_profile)
+            for file in duplicate_files:
+                with open(os.path.join(user_profile.folder, file.file.name), 'rb') as f2:
+                    if md5_hash == hashlib.md5(f2.read()).hexdigest():
+                        # If duplicate file found, delete the uploaded file and return an error message
+                        os.remove(file_path)
+                        messages.error(request, "Duplicate file found!")
+                        return redirect('home')
+            # If no duplicate file found, create a new File object and save it to the database
+            file = File(user_profile=user_profile, file=uploaded_file)
+            file.save()
+            messages.success(request, "File uploaded successfully!")
+            return redirect('home')
     else:
-        form = UploadFileForm()
-    return render(request, 'upload.html', {'form': form})
+        return render(request, 'upload.html')
+    
+    
